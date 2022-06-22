@@ -20,11 +20,15 @@ export default function Complain() {
 
     useEffect(() =>{
         socket = io('http://localhost:5000', {
-            // code here
+            auth: {
+                token: localStorage.getItem('token')
+            }
         })
         loadContact()
 
-        // code here
+        socket.on('connect_error', (err)=>{
+            console.error(err)
+        })
 
         return () => {
             socket.disconnect()
