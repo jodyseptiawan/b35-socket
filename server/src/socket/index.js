@@ -1,8 +1,13 @@
 // import models
 const {chat, user, profile} = require("../../models")
 // import here
+const jwt = require('jsonwebtoken')
+
+const {Op} = require('sequelize')
 
 // init variable here
+let connectedUser = {}
+
 const socketIo = (io) => {
 
   // create middlewares before connection event
@@ -19,6 +24,8 @@ const socketIo = (io) => {
     console.log('client connect: ', socket.id)
     
     // code here
+    const { id: idUser } = jwt.verify(socket.handshake.auth.token, process.env.TOKEN_KEY)
+    connectedUser[idUser] = socket.id
 
     // define listener on event load admin contact
     socket.on("load admin contact", async () => {
@@ -51,6 +58,9 @@ const socketIo = (io) => {
     socket.on("load customer contacts", async () => {
       try {
         let customerContacts = await user.findAll({
+          where: {
+            status: 'customer'
+          },
           include: [
             {
               model: profile,
@@ -97,10 +107,64 @@ const socketIo = (io) => {
     })
 
     // code here
+    socket.on("load messages", async (payload) => {
+      const idRecipient = payload;
+      const idSender = idUser;
+
+      const data = await chat.findAll({
+        where: {
+          idSender: {
+            [Op.or]: [idRecipient,idSender]
+          },
+          idRecipient: {
+            [Op.or]: [idRecipient,idSender]
+          },
+        },
+        include: [
+          {
+            model: user,
+            as: 'recipient',
+            attributes: {
+              exclude: ['createdAt','updatedAt', 'password']
+            }
+          },
+          {
+            model: user,
+            as: 'sender',
+            attributes: {
+              exclude: ['createdAt','updatedAt', 'password']
+            }
+          }
+        ],
+        attributes: {
+          exclude: ['createdAt','updatedAt', 'idRecipient', 'idSender']
+        },
+        order: [['createdAt','ASC']]
+      })
+
+      socket.emit('messages',data)
+    })
+
+
+    socket.on("send message", async (payload) => {
+      try {
+        const { message, idRecipient } = payload       
+        
+        await chat.create({
+          message,
+          idRecipient,
+          idSender: idUser
+        })
+        
+        io.to(socket.id).to(connectedUser[idRecipient]).emit("new message")
+      } catch (error) {
+        console.log(error)
+      }
+    })    
 
     socket.on("disconnect", () => {
       console.log("client disconnected", socket.id)
-      // code here
+      delete connectedUser[idUser]
     })
   })
 }
